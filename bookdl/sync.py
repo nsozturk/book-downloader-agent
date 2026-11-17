@@ -5,7 +5,7 @@ from bookdl.utils import load_json, save_json, sanitize_filename
 
 def sync_log_from_disk(output_dir: Path, queue_file: Path, log_file: Path) -> Dict[str, Any]:
     """
-    Scan .pdf/.epub files in output_dir, match against queue entries, update log with SUCCESS.
+    Scan .pdf/.epub/.djvu/.mobi files in output_dir, match against queue entries, update log with SUCCESS.
     Returns stats dict.
     """
     queue = load_json(queue_file, default=[])
@@ -14,7 +14,7 @@ def sync_log_from_disk(output_dir: Path, queue_file: Path, log_file: Path) -> Di
     disk_files = []
     if output_dir.exists():
         for file in os.listdir(output_dir):
-            if file.endswith('.pdf') or file.endswith('.epub'):
+            if file.endswith(('.pdf', '.epub', '.djvu', '.mobi')):
                 disk_files.append(file)
                 
     synced = 0

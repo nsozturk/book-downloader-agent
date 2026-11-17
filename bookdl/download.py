@@ -1,40 +1,106 @@
+import hashlib
 import os
 import requests
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from bookdl.utils import build_queries, sanitize_filename, save_json, load_json
 from bookdl.search import search_md5_candidates, get_direct_download_url, get_working_mirror
-from bookdl.config import HEADERS, LIBGEN_MIRRORS, MIN_FILE_SIZE, ANNA_MIRRORS
+from bookdl.config import HEADERS, LIBGEN_MIRRORS, MIN_FILE_SIZE, MAX_FILE_SIZE, ANNA_MIRRORS
 
-def download_file(url: str, referer: str, dest_path: Path, min_size: int = MIN_FILE_SIZE) -> bool:
+_path_lock = threading.Lock()
+
+def detect_book_type(head: bytes) -> Optional[str]:
     """
-    Streaming download with size validation and proper error handling.
+    Detects the book format from the first bytes of the file. Returns the extension or None.
+    """
+    if b'%PDF-' in head[:1024]:
+        return 'pdf'
+    if head[:4] == b'PK\x03\x04' and head[30:58] == b'mimetypeapplication/epub+zip':
+        return 'epub'
+    if head[:8] == b'AT&TFORM':
+        return 'djvu'
+    if head[60:68] in (b'BOOKMOBI', b'TEXtREAd'):
+        return 'mobi'
+    return None
+
+def unique_path(output_dir: Path, base_name: str, ext: str) -> Path:
+    """
+    Returns a path that does not exist yet: `base_name.ext`, then `base_name (1).ext`, etc.
+    """
+    candidate = output_dir / f"{base_name}.{ext}"
+    n = 1
+    while candidate.exists():
+        candidate = output_dir / f"{base_name} ({n}).{ext}"
+        n += 1
+    return candidate
+
+def download_file(url: str, referer: str, expected_md5: str, output_dir: Path, base_name: str,
+                  min_size: int = MIN_FILE_SIZE, max_size: int = MAX_FILE_SIZE) -> Optional[Path]:
+    """
+    Streams the file into a temp `.part` file, verifies HTTPS, size, MD5 and file type,
+    then moves it to a new unique path. Returns the final path, or None on any failure.
     """
     headers = HEADERS.copy()
     if referer:
         headers['Referer'] = referer
 
+    fd, tmp_name = tempfile.mkstemp(prefix='.bookdl-', suffix='.part', dir=output_dir)
+    tmp_path = Path(tmp_name)
     try:
-        with requests.get(url, headers=headers, stream=True, timeout=20) as r:
-            r.raise_for_status()
-            with open(dest_path, 'wb') as f:
+        with os.fdopen(fd, 'wb') as f:
+            with requests.get(url, headers=headers, stream=True, timeout=20) as r:
+                r.raise_for_status()
+                if not r.url.startswith('https://'):
+                    print(f"Rejected: final URL is not HTTPS ({r.url})")
+                    return None
+                length = r.headers.get('Content-Length')
+                if length and length.isdigit() and int(length) > max_size:
+                    print(f"Rejected: Content-Length {length} exceeds {max_size} bytes")
+                    return None
+
+                md5 = hashlib.md5()
+                head = b''
+                total = 0
                 for chunk in r.iter_content(chunk_size=8192):
+                    if not chunk:
+                        continue
+                    total += len(chunk)
+                    if total > max_size:
+                        print(f"Rejected: download exceeds {max_size} bytes")
+                        return None
+                    if len(head) < 1024:
+                        head += chunk[:1024 - len(head)]
+                    md5.update(chunk)
                     f.write(chunk)
-        
-        if os.path.getsize(dest_path) < min_size:
-            os.remove(dest_path)
-            return False
-        return True
-    except Exception:
-        if dest_path.exists():
+
+        if total < min_size:
+            print(f"Rejected: file too small ({total} bytes)")
+            return None
+        if md5.hexdigest() != expected_md5.lower():
+            print(f"Rejected: MD5 mismatch (expected {expected_md5.lower()}, got {md5.hexdigest()})")
+            return None
+        ext = detect_book_type(head)
+        if not ext:
+            print("Rejected: unknown file type")
+            return None
+
+        with _path_lock:
+            dest_path = unique_path(output_dir, base_name, ext)
+            os.replace(tmp_path, dest_path)
+        return dest_path
+    except (requests.RequestException, OSError) as e:
+        print(f"Download error: {e}")
+        return None
+    finally:
+        if tmp_path.exists():
             try:
-                os.remove(dest_path)
+                os.remove(tmp_path)
             except OSError:
                 pass
-        return False
 
 def download_book(book: Dict[str, Any], anna_mirror: str, output_dir: Path, log_data: Dict[str, Any], log_file: Path) -> bool:
     """
@@ -46,13 +112,13 @@ def download_book(book: Dict[str, Any], anna_mirror: str, output_dir: Path, log_
         print(f"Searching: {query}")
         md5_candidates = search_md5_candidates(query, anna_mirror)
         for md5 in md5_candidates:
-            url, ext, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
-            if url and ext:
-                filename = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}.{ext}")
-                dest_path = output_dir / filename
-                print(f"Downloading {filename}...")
-                if download_file(url, referer or '', dest_path):
-                    print("Download successful!")
+            url, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
+            if url:
+                base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
+                print(f"Downloading {base_name} (md5 {md5})...")
+                dest_path = download_file(url, referer or '', md5, output_dir, base_name)
+                if dest_path:
+                    print(f"Download successful: {dest_path}")
                     book_id = book.get('id', str(hash(book.get('title'))))
                     log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
                     save_json(log_file, log_data)
@@ -111,11 +177,12 @@ def download_parallel(books: List[Dict[str, Any]], output_dir: Path, log_file: P
         for query in queries:
             md5_candidates = search_md5_candidates(query, anna_mirror)
             for md5 in md5_candidates:
-                url, ext, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
-                if url and ext:
-                    filename = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}.{ext}")
-                    dest_path = output_dir / filename
-                    if download_file(url, referer or '', dest_path):
+                url, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
+                if url:
+                    base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
+                    dest_path = download_file(url, referer or '', md5, output_dir, base_name)
+                    if dest_path:
+                        print(f"Download successful: {dest_path}")
                         with lock:
                             log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
                             save_json(log_file, log_data)

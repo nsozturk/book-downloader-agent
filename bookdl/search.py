@@ -1,5 +1,7 @@
+import html
 import re
 import requests
+from urllib.parse import urljoin, urlsplit, urlunsplit
 from typing import List, Tuple, Optional
 from bookdl.config import LIBGEN_SEARCH
 
@@ -48,26 +50,38 @@ def search_md5_candidates(query: str, anna_mirror: str, max_candidates: int = 10
                 break
     return unique
 
-def get_direct_download_url(md5: str, libgen_mirrors: List[str]) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def _safe_https_url(base: str, link: str) -> Optional[str]:
     """
-    Fetches the download URL for an MD5 hash from libgen mirrors.
+    Resolves `link` against `base`, upgrades http:// to https:// and rejects any other scheme.
+    """
+    absolute = urljoin(base, html.unescape(link))
+    parts = urlsplit(absolute)
+    if parts.scheme == 'http':
+        parts = parts._replace(scheme='https')
+    elif parts.scheme != 'https':
+        return None
+    if not parts.netloc:
+        return None
+    return urlunsplit(parts)
+
+def get_direct_download_url(md5: str, libgen_mirrors: List[str]) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Fetches the download URL for an MD5 hash from libgen mirrors over HTTPS.
+    Returns (download_url, referer). The file type is detected later from the content.
     """
     headers = {'User-Agent': 'Mozilla/5.0'}
     for mirror in libgen_mirrors:
         try:
-            url = f"http://{mirror}/ads.php?md5={md5}"
+            url = f"https://{mirror}/ads.php?md5={md5}"
             resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200:
+            if resp.status_code == 200 and resp.url.startswith('https://'):
                 match = re.search(r'href="(get\.php\?md5=[^"]+)"', resp.text)
+                if not match:
+                    match = re.search(r'href="([^"]+\.(?:pdf|epub))"', resp.text, re.IGNORECASE)
                 if match:
-                    return f"http://{mirror}/{match.group(1)}", "pdf", url
-                
-                match = re.search(r'href="([^"]+\.(pdf|epub))"', resp.text, re.IGNORECASE)
-                if match:
-                    link = match.group(1)
-                    if not link.startswith('http'):
-                        link = f"http://{mirror}/{link}"
-                    return link, match.group(2).lower(), url
+                    link = _safe_https_url(resp.url, match.group(1))
+                    if link:
+                        return link, url
         except requests.RequestException:
             continue
-    return None, None, None
+    return None, None
