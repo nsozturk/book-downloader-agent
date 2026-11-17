@@ -66,9 +66,14 @@ In a manual setup, type `python -m bookdl` where this README says `bookdl`.
 
 ### CLI Commands
 
+You give only a list of books. One `download` run finds the edition, downloads the file, runs the safety checks and moves each book that passes to `~/Books`. A book that fails a check stays in quarantine. You do not need a second command. `bookdl release` stays for files that are still in quarantine.
+
 ```bash
-# Download all books from your queue
+# Search, download, check and release: each book that passes goes to ~/Books
 python -m bookdl download
+
+# Download only. Keep every file in quarantine (skip the checks and the release)
+python -m bookdl download --no-release
 
 # Download with parallel workers (4 concurrent category threads)
 python -m bookdl download --parallel --workers 4
@@ -76,7 +81,7 @@ python -m bookdl download --parallel --workers 4
 # Download specific categories only
 python -m bookdl download --categories 01,02,03
 
-# Retry all failed/missing books
+# Retry all failed books, with the same checks
 python -m bookdl retry
 
 # Extract books from markdown lists into a JSON queue
@@ -92,7 +97,7 @@ python -m bookdl status
 python -m bookdl open
 python -m bookdl open 3
 
-# List the books in quarantine, then check one and move it to ~/Books
+# For files that are still in quarantine: list them, then check one and move it to ~/Books
 python -m bookdl release
 python -m bookdl release 3
 
@@ -105,7 +110,8 @@ python -m bookdl release --all
 | Option | Description | Default |
 |---|---|---|
 | `--output-dir PATH` | Download directory | `~/.local/share/bookdl/quarantine` |
-| `--library-dir PATH` | Folder for books that pass `bookdl release` | `~/Books` |
+| `--library-dir PATH` | Folder for books that pass the checks | `~/Books` |
+| `--no-release` | `download` and `retry` only: keep every file in quarantine. A later `download` skips these books. Run `bookdl release --all` to check them | Off |
 | `--queue-file PATH` | Books queue JSON file | `./books_queue.json` |
 | `--log-file PATH` | Download log JSON file | `./download_log.json` |
 | `--bypass-dns IP` | Resolve the LibGen hosts to this IP (supply an IP you trust) | Off |
@@ -119,24 +125,42 @@ Create a JSON file with an array of book objects. See [`examples/books_queue.exa
 ```json
 [
   {
-    "category_group": "01_psychology_fundamentals",
-    "subcategory": "Cognitive Behavioral Therapy",
     "title": "Feeling Good: The New Mood Therapy",
     "author": "David D. Burns",
     "year": "1980",
-    "search_query": "Feeling Good David Burns"
+    "language": "English",
+    "formats": ["epub", "pdf"]
   }
 ]
 ```
 
 | Field | Required | Description |
 |---|---|---|
-| `category_group` | ✅ | Top-level directory name for organizing downloads |
-| `subcategory` | ✅ | Subdirectory name within the category |
 | `title` | ✅ | Full book title |
 | `author` | ✅ | Author name(s) |
-| `year` | ❌ | Publication year |
+| `id` | ❌ | Stable unique string. If missing, `bookdl` makes one from title and author |
 | `search_query` | ❌ | Custom search query override |
+| `language` | ❌ | Language name in English, as the book mirror writes it, for example `"English"` |
+| `formats` | ❌ | Ordered list of extensions without a dot, best first, for example `["epub", "pdf"]` |
+| `year` | ❌ | Publication year. A result with this year ranks higher |
+| `edition` | ❌ | Edition number, for example `"6"`. A result whose title names this edition ranks higher |
+| `publisher` | ❌ | Publisher |
+
+Edition matching is approximate: `"6"` matches title text such as "6th edition", "sixth edition", "edition 6" or "6e", and it can miss other spellings. A wrong language or a wrong format is never downloaded as a substitute. If you name a language, a search result with no language information is skipped too. If no result has the language and the format that you asked for, the book is reported as `NOT FOUND`.
+
+### Report
+
+`download` and `retry` print one line per processed book after the last book, then one line of counts:
+
+```
+IN LIBRARY: <title> -> <path>
+IN QUARANTINE: <title>: <reasons joined with "; ">
+NOT FOUND: <title>
+FAILED: <title>
+SUMMARY: library=<n> quarantine=<n> not_found=<n> failed=<n>
+```
+
+A book that is `IN LIBRARY` or `IN QUARANTINE` is done and is skipped by the next `download` and `retry`.
 
 ### AI Agent Setup
 
@@ -150,8 +174,9 @@ book-downloader-agent/
 │   ├── cli.py                  # CLI entry point with subcommands
 │   ├── config.py               # Mirror URLs, headers, DNS bypass
 │   ├── net.py                  # HTTPS-only requests, block on local addresses
-│   ├── search.py               # Anna's Archive + LibGen search
-│   ├── download.py             # File download + batch processing
+│   ├── search.py               # LibGen + Anna's Archive search, returns candidates
+│   ├── match.py                # Ranks candidates by language, format, year, edition
+│   ├── download.py             # File download + one pipeline per book (search, download, check, release)
 │   ├── extract.py              # Markdown → JSON queue parser
 │   ├── sync.py                 # Disk-to-log reconciliation
 │   ├── viewer.py               # Opens a book in a bubblewrap sandbox
@@ -183,6 +208,8 @@ This uses the patch of Python's `socket.getaddrinfo` in `bookdl/net.py`, so that
 
 ## Security
 
+The release checks run as part of every `bookdl download` and `bookdl retry`, unless you pass `--no-release`. A check that fails or ends with an error keeps the file in quarantine.
+
 Checks in the downloader:
 
 - All search and download requests use HTTPS. The downloader follows redirects itself and rejects a hop that is not HTTPS.
@@ -202,7 +229,7 @@ Handling of the downloaded files:
 Rules that the plugin hook (`hooks/guard.py`) enforces in Claude Code:
 
 - No agent can read, search or change the bookdl data folder with the file tools. A Bash command that names the folder is denied, unless it is a plain `bookdl ...` command.
-- The subagent `bookdl-runner` can run only plain `bookdl ...` commands with relative paths, without `--output-dir` and without `--library-dir`, and can use files only inside the working directory.
+- The subagent `bookdl-runner` can run `bookdl download --parallel`, `bookdl retry` and the other plain `bookdl ...` commands. It can run only plain `bookdl ...` commands with relative paths, without `--output-dir` and without `--library-dir`, and can use files only inside the working directory.
 
 Limits that you must know:
 
@@ -211,18 +238,18 @@ Limits that you must know:
 - If you pass `--output-dir`, the files are outside the quarantine folder and outside the hook.
 - Do not browse the quarantine folder in a file manager with previews turned on. A thumbnailer parses the files without a sandbox.
 
-### Release from quarantine
+### Release checks
 
-`bookdl release [target] [--all] [--library-dir PATH]` checks the books in the quarantine folder and moves each book that passes every check to the library folder `~/Books`. The library folder is outside `~/.local/share/bookdl`, so the plugin hook does not block it. `target` is a list number or a part of the file name. Without `target` and without `--all`, the command prints the numbered list and exits with code 1.
+`bookdl download` and `bookdl retry` check each downloaded book and move it to the library folder `~/Books` if it passes every check. The library folder is outside `~/.local/share/bookdl`, so the plugin hook does not block it. `bookdl release [target] [--all] [--library-dir PATH]` is the command for files that are still in quarantine, for example after `--no-release` or after a failed check. `target` is a list number or a part of the file name. Without `target` and without `--all`, the command prints the numbered list and exits with code 1.
 
-The command runs two checks, in this order. A file that fails any check stays in the quarantine folder.
+The checks run in this order. A file that fails any check stays in the quarantine folder.
 
 1. VirusTotal hash lookup, only if `VT_API_KEY` is set. Any engine that reports "malicious" or "suspicious" fails the book. A quota error or another API error also fails it (fail-closed). A hash that VirusTotal does not know gives a warning. Without the key, the command prints one warning line and continues.
-2. Active-content check. A PDF is inspected with `qpdf --json`. An EPUB is inspected with the Python `zipfile` module. DjVu and MOBI files are not inspected, and the command prints a warning.
+2. Active-content check. A PDF is inspected with `qpdf --json`. An EPUB is inspected with the Python `zipfile` module. DjVu and MOBI files have no content check. Such a file passes only with a clean VirusTotal verdict. Without that verdict it stays in quarantine.
 
 The policy is detect and refuse. The command never strips or rewrites a file, because `qpdf` has no option that removes JavaScript.
 
-Each book gets one result line: `RELEASED: <name> -> <path>` or `KEPT IN QUARANTINE: <name>: <reason>`. The exit code is 0 if every processed book was released, and 1 otherwise.
+`download` and `retry` report the result in the [Report](#report) lines. `bookdl release` prints one line per book: `RELEASED: <name> -> <path>` or `KEPT IN QUARANTINE: <name>: <reason>`. Its exit code is 0 if every processed book was released, and 1 otherwise.
 
 To turn on the VirusTotal lookup, make a free VirusTotal account and set the key:
 
@@ -236,9 +263,9 @@ Limits of the release check:
 
 - A pass means "no engine on VirusTotal flags the file, and the common active-content patterns are absent". It does not mean "proven safe".
 - A new exploit hidden in a font or an image passes every check.
-- DjVu and MOBI files get no active-content check.
+- DjVu and MOBI files get no active-content check. They need a clean VirusTotal verdict, so without `VT_API_KEY` they stay in quarantine.
 - A released book is still untrusted. An agent that has a shell must not follow instructions found inside it.
-- `bookdl release` needs bubblewrap and network access. If the Bash tool of an agent is sandboxed, run `! bookdl release --all` yourself.
+- The checks need `qpdf` and network access. If the Bash tool of an agent is sandboxed, run `! bookdl release --all` yourself for the files that stay in quarantine.
 
 ## License
 

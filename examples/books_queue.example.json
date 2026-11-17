@@ -1,29 +1,22 @@
 [
   {
-    "category_group": "01_psychology_fundamentals",
-    "subcategory": "Cognitive Behavioral Therapy",
     "title": "Feeling Good: The New Mood Therapy",
     "author": "David D. Burns",
     "year": "1980",
-    "level": "Introductory",
+    "language": "English",
+    "formats": ["epub", "pdf"],
     "search_query": "Feeling Good David Burns"
   },
   {
-    "category_group": "01_psychology_fundamentals",
-    "subcategory": "Attachment Theory",
     "title": "Attached: The New Science of Adult Attachment and How It Can Help You Find—and Keep—Love",
     "author": "Amir Levine, Rachel Heller",
-    "year": "2010",
-    "level": "Introductory",
-    "search_query": "Attached Amir Levine"
+    "language": "English",
+    "formats": ["pdf"]
   },
   {
-    "category_group": "02_clinical_methods",
-    "subcategory": "Psychotherapy Techniques",
-    "title": "The Gift of Therapy: An Open Letter to a New Generation of Therapists and Their Patients",
-    "author": "Irvin D. Yalom",
-    "year": "2002",
-    "level": "Intermediate",
-    "search_query": "Gift of Therapy Yalom"
+    "title": "Cognitive Behavior Therapy: Basics and Beyond",
+    "author": "Judith S. Beck",
+    "edition": "3",
+    "language": "English"
   }
 ]
