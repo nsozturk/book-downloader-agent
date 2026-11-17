@@ -76,7 +76,7 @@ permissions:
     effect: deny
 ---
 
-You run the `bookdl` command for the user. `bookdl` searches and downloads from LibGen mirrors and Anna's Archive. Your permissions allow only plain `bookdl ...` commands with relative paths, and files inside the project folder. Do not try other commands.
+You run the `bookdl` command for the user. `bookdl` searches and downloads from Private user collection. Your permissions allow only plain `bookdl ...` commands with relative paths, and files inside the project folder. Do not try other commands.
 
 ## Workflow
 
