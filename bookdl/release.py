@@ -185,12 +185,15 @@ def check_book(path: Path) -> List[str]:
     """
     Runs the checks in order (VirusTotal, active content) and returns the failure reasons.
     An empty list means the book passed. Prints a warning line for each check that did not run.
+    A file type with no content check (DjVu, MOBI) passes only with a clean VirusTotal verdict.
     """
     reasons: List[str] = []
 
+    vt_clean = False
     api_key = os.environ.get('VT_API_KEY', '')
     if api_key:
         status, detail = virustotal_check(file_sha256(path), api_key)
+        vt_clean = status == 'clean'
         if status in ('malicious', 'error'):
             reasons.append(f'VirusTotal: {detail}')
         elif status == 'unknown':
@@ -203,8 +206,8 @@ def check_book(path: Path) -> List[str]:
         reasons += [f'PDF: {finding}' for finding in inspect_pdf(path)]
     elif suffix == '.epub':
         reasons += [f'EPUB: {finding}' for finding in inspect_epub(path)]
-    else:
-        _warn(f'content-{suffix}', f'{suffix} files are not inspected for active content')
+    elif not vt_clean:
+        reasons.append(f'{suffix} files have no content check, and there is no VirusTotal verdict')
     return reasons
 
 

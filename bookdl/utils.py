@@ -1,9 +1,10 @@
+import hashlib
 import json
 import os
 import re
 import tempfile
 from pathlib import Path
-from typing import Any, List
+from typing import Any, Dict, List
 
 def sanitize_filename(name: str) -> str:
     """
@@ -18,6 +19,16 @@ def safe_text(text: Any, limit: int = 120) -> str:
     An AI agent reads the output, so text from a server or from a book list must not reach it raw.
     """
     return ''.join(c if c.isprintable() else ' ' for c in str(text))[:limit]
+
+def book_id(book: Dict[str, Any]) -> str:
+    """
+    Stable id of a queue entry: its "id" if set, otherwise the first 16 hex characters of
+    the SHA-1 of title + newline + author.
+    """
+    if book.get('id'):
+        return str(book['id'])
+    key = f"{book.get('title', '')}\n{book.get('author', '')}"
+    return hashlib.sha1(key.encode('utf-8')).hexdigest()[:16]
 
 def clean_query_text(text: str) -> str:
     """

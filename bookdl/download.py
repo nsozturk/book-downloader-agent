@@ -3,16 +3,22 @@ import os
 import requests
 import tempfile
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
-from bookdl.utils import build_queries, sanitize_filename, save_json, load_json, safe_text
+from bookdl import release
+from bookdl.utils import build_queries, sanitize_filename, save_json, load_json, safe_text, book_id
 from bookdl.net import https_get
-from bookdl.search import search_md5_candidates, get_direct_download_url, get_working_mirror
-from bookdl.config import HEADERS, LIBGEN_MIRRORS, MIN_FILE_SIZE, MAX_FILE_SIZE, ANNA_MIRRORS
+from bookdl.match import rank_candidates
+from bookdl.search import search_candidates, get_direct_download_url, get_working_mirror
+from bookdl.config import VT_SECONDS_BETWEEN_LOOKUPS, HEADERS, LIBGEN_MIRRORS, MIN_FILE_SIZE, MAX_FILE_SIZE, ANNA_MIRRORS
 
 _path_lock = threading.Lock()
+_vt_lock = threading.Lock()
+_vt_last_check = 0.0
+DONE_STATUSES = ('RELEASED', 'QUARANTINED', 'SUCCESS')
 
 def detect_book_type(head: bytes) -> Optional[str]:
     """
@@ -100,59 +106,143 @@ def download_file(url: str, referer: str, expected_md5: str, output_dir: Path, b
             except OSError:
                 pass
 
-def download_book(book: Dict[str, Any], anna_mirror: str, output_dir: Path, log_data: Dict[str, Any], log_file: Path) -> bool:
+def is_done(log_data: Dict[str, Any], book: Dict[str, Any]) -> bool:
     """
-    Full pipeline for downloading a single book.
+    True if the log says this book is already released or quarantined (the old SUCCESS counts too).
+    """
+    return log_data.get(book_id(book), {}).get('status') in DONE_STATUSES
+
+def _check_rate_limited(path: Path) -> List[str]:
+    """
+    Runs release.check_book, at most one lookup per VT_SECONDS_BETWEEN_LOOKUPS when VT_API_KEY is set.
+    """
+    global _vt_last_check
+    with _vt_lock:
+        if os.environ.get('VT_API_KEY'):
+            wait = _vt_last_check + VT_SECONDS_BETWEEN_LOOKUPS - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)
+        try:
+            return release.check_book(path)
+        finally:
+            _vt_last_check = time.monotonic()
+
+def _release_or_quarantine(path: Path, library_dir: Optional[Path]) -> Dict[str, Any]:
+    """
+    Runs the safety checks on a downloaded file and moves it to the library if it passes.
+    Fail-closed: any error leaves the file in quarantine.
+    """
+    if library_dir is None:
+        return {'status': 'QUARANTINED', 'file': str(path), 'reasons': ['release skipped']}
+    try:
+        reasons = _check_rate_limited(path)
+        if not reasons:
+            library_dir.mkdir(parents=True, exist_ok=True)
+            destination = release.move_to_library(path, library_dir)
+            return {'status': 'RELEASED', 'file': str(destination)}
+    except Exception:
+        reasons = ['check failed with an internal error']
+    return {'status': 'QUARANTINED', 'file': str(path), 'reasons': reasons}
+
+def process_book(book: Dict[str, Any], anna_mirror: str, output_dir: Path, library_dir: Optional[Path]) -> Dict[str, Any]:
+    """
+    Finds, downloads and checks one book. Returns the log entry:
+    RELEASED, QUARANTINED (with reasons), NOT_FOUND or FAILED.
     """
     queries = build_queries(book.get('title', ''), book.get('author', ''), book.get('search_query', ''))
-    
+    formats = [f.lower().lstrip('.') for f in book.get('formats') or []]
+    base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
+    seen = set()
+    found_any = False
+
     for query in queries:
         print(f"Searching: {safe_text(query)}")
-        md5_candidates = search_md5_candidates(query, anna_mirror)
-        for md5 in md5_candidates:
-            url, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
-            if url:
-                base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
-                print(f"Downloading {safe_text(base_name)} (md5 {md5})...")
-                dest_path = download_file(url, referer or '', md5, output_dir, base_name)
-                if dest_path:
-                    print(f"Download successful: {safe_text(dest_path, 400)}")
-                    book_id = book.get('id', str(hash(book.get('title'))))
-                    log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
-                    save_json(log_file, log_data)
-                    return True
-    
-    print("Download failed.")
-    book_id = book.get('id', str(hash(book.get('title'))))
-    log_data[book_id] = {'status': 'FAILED'}
-    save_json(log_file, log_data)
-    return False
+        try:
+            candidates = rank_candidates(search_candidates(query, anna_mirror), book)
+        except Exception as e:
+            print(f"Search error: {type(e).__name__}")
+            continue
+        for candidate in candidates:
+            if candidate.md5 in seen:
+                continue
+            seen.add(candidate.md5)
+            found_any = True
+            url, referer = get_direct_download_url(candidate.md5, LIBGEN_MIRRORS)
+            if not url:
+                continue
+            print(f"Downloading {safe_text(base_name)} (md5 {safe_text(candidate.md5, 32)})...")
+            dest_path = download_file(url, referer or '', candidate.md5, output_dir, base_name)
+            if not dest_path:
+                continue
+            real_ext = Path(dest_path).suffix.lower().lstrip('.')
+            if formats and real_ext not in formats:
+                print(f"Rejected: file type {safe_text(real_ext, 10)} is not in the wanted formats")
+                Path(dest_path).unlink(missing_ok=True)
+                continue
+            print(f"Download successful: {safe_text(dest_path, 400)}")
+            return _release_or_quarantine(Path(dest_path), library_dir)
 
-def download_batch(books: List[Dict[str, Any]], output_dir: Path, queue_file: Path, log_file: Path, limit: int = 0, categories: str = '') -> None:
+    return {'status': 'FAILED'} if found_any else {'status': 'NOT_FOUND'}
+
+def report_lines(results: List[Tuple[Dict[str, Any], Dict[str, Any]]]) -> List[str]:
     """
-    Sequential batch download with category filtering and progress reporting.
+    Builds the final report: one line per processed book, then the SUMMARY line.
+    """
+    lines = []
+    counts = {'RELEASED': 0, 'QUARANTINED': 0, 'NOT_FOUND': 0, 'FAILED': 0}
+    for book, entry in results:
+        status = entry.get('status')
+        title = safe_text(book.get('title', 'Unknown'), 200)
+        if status == 'RELEASED':
+            lines.append(f"IN LIBRARY: {title} -> {safe_text(entry.get('file', ''), 400)}")
+        elif status == 'QUARANTINED':
+            lines.append(f"IN QUARANTINE: {title}: {safe_text('; '.join(entry.get('reasons', [])), 400)}")
+        elif status == 'NOT_FOUND':
+            lines.append(f"NOT FOUND: {title}")
+        else:
+            status = 'FAILED'
+            lines.append(f"FAILED: {title}")
+        counts[status] += 1
+    lines.append(f"SUMMARY: library={counts['RELEASED']} quarantine={counts['QUARANTINED']} "
+                 f"not_found={counts['NOT_FOUND']} failed={counts['FAILED']}")
+    return lines
+
+def print_report(results: List[Tuple[Dict[str, Any], Dict[str, Any]]]) -> None:
+    """
+    Prints the final report of a download run.
+    """
+    for line in report_lines(results):
+        print(line)
+
+def download_batch(books: List[Dict[str, Any]], output_dir: Path, queue_file: Path, log_file: Path, limit: int = 0,
+                   categories: str = '', library_dir: Optional[Path] = None) -> None:
+    """
+    Sequential batch download with category filtering, safety checks and a final report.
     """
     anna_mirror = get_working_mirror(ANNA_MIRRORS, HEADERS)
     log_data = load_json(log_file, default={})
     cats = [c.strip() for c in categories.split(',')] if categories else []
 
-    count = 0
+    results = []
     for book in books:
-        if limit > 0 and count >= limit:
+        if limit > 0 and len(results) >= limit:
             break
         if cats and book.get('category') not in cats:
             continue
-            
-        book_id = book.get('id', str(hash(book.get('title'))))
-        if log_data.get(book_id, {}).get('status') == 'SUCCESS':
+        if is_done(log_data, book):
             continue
-            
-        download_book(book, anna_mirror, output_dir, log_data, log_file)
-        count += 1
 
-def download_parallel(books: List[Dict[str, Any]], output_dir: Path, log_file: Path, categories: str = '', max_workers: int = 4) -> None:
+        entry = process_book(book, anna_mirror, output_dir, library_dir)
+        log_data[book_id(book)] = entry
+        save_json(log_file, log_data)
+        results.append((book, entry))
+
+    print_report(results)
+
+def download_parallel(books: List[Dict[str, Any]], output_dir: Path, log_file: Path, categories: str = '',
+                      max_workers: int = 4, library_dir: Optional[Path] = None) -> None:
     """
-    Parallel batch download grouped by category_group using ThreadPoolExecutor.
+    Parallel batch download using ThreadPoolExecutor, with safety checks and a final report.
     """
     anna_mirror = get_working_mirror(ANNA_MIRRORS, HEADERS)
     log_data = load_json(log_file, default={})
@@ -160,36 +250,21 @@ def download_parallel(books: List[Dict[str, Any]], output_dir: Path, log_file: P
     cats = [c.strip() for c in categories.split(',')] if categories else []
 
     books_to_download = []
-    for book in books:
-        if cats and book.get('category') not in cats:
+    seen_ids = set()
+    for b in books:
+        if (cats and b.get('category') not in cats) or is_done(log_data, b) or book_id(b) in seen_ids:
             continue
-        book_id = book.get('id', str(hash(book.get('title'))))
-        if log_data.get(book_id, {}).get('status') == 'SUCCESS':
-            continue
-        books_to_download.append(book)
+        seen_ids.add(book_id(b))
+        books_to_download.append(b)
 
     def worker(book):
-        book_id = book.get('id', str(hash(book.get('title'))))
-        queries = build_queries(book.get('title', ''), book.get('author', ''), book.get('search_query', ''))
-        
-        for query in queries:
-            md5_candidates = search_md5_candidates(query, anna_mirror)
-            for md5 in md5_candidates:
-                url, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
-                if url:
-                    base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
-                    dest_path = download_file(url, referer or '', md5, output_dir, base_name)
-                    if dest_path:
-                        print(f"Download successful: {safe_text(dest_path, 400)}")
-                        with lock:
-                            log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
-                            save_json(log_file, log_data)
-                        return True
+        entry = process_book(book, anna_mirror, output_dir, library_dir)
         with lock:
-            log_data[book_id] = {'status': 'FAILED'}
+            log_data[book_id(book)] = entry
             save_json(log_file, log_data)
-        return False
+        return book, entry
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for _ in executor.map(worker, books_to_download):
-            pass
+        results = list(executor.map(worker, books_to_download))
+
+    print_report(results)

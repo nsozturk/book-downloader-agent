@@ -1,7 +1,7 @@
 import os
 from pathlib import Path
 from typing import List, Dict, Any
-from bookdl.utils import save_json
+from bookdl.utils import save_json, book_id
 
 def parse_markdown_file(category_prefix: str, filepath: Path) -> List[Dict[str, Any]]:
     """
@@ -30,7 +30,7 @@ def parse_markdown_file(category_prefix: str, filepath: Path) -> List[Dict[str, 
                 author = parts[1]
                 year = parts[2] if len(parts) > 2 else ''
                 books.append({
-                    'id': f"{category_prefix}_{hash(title + author)}",
+                    'id': f"{category_prefix}_{book_id({'title': title, 'author': author})}",
                     'title': title,
                     'author': author,
                     'year': year,
