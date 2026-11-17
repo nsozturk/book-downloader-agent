@@ -12,6 +12,9 @@ HEADERS = {
 }
 MIN_FILE_SIZE = 10000
 MAX_FILE_SIZE = 500 * 1024 * 1024
+VT_API_URL = 'https://www.virustotal.com/api/v3'
+VT_MAX_DETECTIONS = 0
+VT_SECONDS_BETWEEN_LOOKUPS = 16  # public API: 4 requests per minute
 
 def default_output_dir() -> Path:
     """
@@ -29,3 +32,9 @@ def prepare_quarantine(path: Path) -> None:
     os.chmod(path, 0o700)
     for marker in ('.trackerignore', '.nomedia'):
         (path / marker).touch(exist_ok=True)
+
+def default_library_dir() -> Path:
+    """
+    The library folder for books that passed the checks: `~/Books`. It is outside the bookdl data folder.
+    """
+    return Path.home() / 'Books'

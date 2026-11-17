@@ -7,12 +7,13 @@ from bookdl.download import download_batch, download_parallel
 from bookdl.extract import extract_books
 from bookdl.sync import sync_log_from_disk
 from bookdl.utils import load_json
+from bookdl.release import release_books
 from bookdl.viewer import find_book, open_sandboxed
 
 def main():
-    parser = argparse.ArgumentParser(description="bookdl - Shadow Library Book Downloader Agent")
-    parser.add_argument('command', choices=['download', 'retry', 'extract', 'sync', 'status', 'open'], help="Command to run")
-    parser.add_argument('target', nargs='?', default='', help="For `open`: the list number or a part of the file name")
+    parser = argparse.ArgumentParser(description="bookdl - Shadow Library Book Downloader Agent", allow_abbrev=False)
+    parser.add_argument('command', choices=['download', 'retry', 'extract', 'sync', 'status', 'open', 'release'], help="Command to run")
+    parser.add_argument('target', nargs='?', default='', help="For `open` and `release`: the list number or a part of the file name")
     
     parser.add_argument('--output-dir', type=Path, default=None, help="Download directory (default: the quarantine folder)")
     parser.add_argument('--queue-file', type=Path, default=Path(config.DEFAULT_QUEUE_FILE), help="Books queue JSON")
@@ -24,6 +25,9 @@ def main():
     parser.add_argument('--parallel', action='store_true', help="Use parallel category workers")
     parser.add_argument('--workers', type=int, default=4, help="Number of parallel workers")
     
+    parser.add_argument('--all', action='store_true', help="For `release`: check and release every book")
+    parser.add_argument('--library-dir', type=Path, default=None, help="For `release`: library folder (default: ~/Books)")
+
     parser.add_argument('--docs-dir', type=Path, help="Directory containing markdown book lists")
     
     args = parser.parse_args()
@@ -66,6 +70,10 @@ def main():
         elif args.command == 'open':
             book = find_book(args.output_dir, args.target)
             sys.exit(open_sandboxed(book) if book else 1)
+
+        elif args.command == 'release':
+            library_dir = args.library_dir or config.default_library_dir()
+            sys.exit(release_books(args.output_dir, library_dir, args.target, args.all))
 
         elif args.command == 'sync':
             stats = sync_log_from_disk(args.output_dir, args.queue_file, args.log_file)

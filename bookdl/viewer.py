@@ -52,15 +52,11 @@ def find_reader() -> Optional[str]:
     return None
 
 
-def sandbox_command(book: Path, reader: str, bwrap: str, wayland_socket: Path) -> List[str]:
+def _base_bind(bwrap: str) -> List[str]:
     """
-    Builds the bubblewrap command. Inside the sandbox the reader has:
-
-    - no network and no access to the session D-Bus,
-    - a read-only system, an empty home folder and an empty /tmp,
-    - one book, read-only, and the Wayland socket to show its window.
+    The bubblewrap arguments that both sandboxes share: no namespaces shared, a read-only system,
+    an empty home folder and an empty /tmp.
     """
-    runtime = f'/run/user/{os.getuid()}'
     cmd = [bwrap, '--unshare-all', '--die-with-parent', '--new-session', '--clearenv',
            '--ro-bind', '/usr', '/usr']
     for host_dir in HOST_DIRS:
@@ -71,14 +67,40 @@ def sandbox_command(book: Path, reader: str, bwrap: str, wayland_socket: Path) -
     for etc_path in HOST_ETC:
         if os.path.exists(etc_path):
             cmd += ['--ro-bind', etc_path, etc_path]
-    cmd += ['--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', SANDBOX_HOME,
-            '--dir', runtime, '--ro-bind', str(wayland_socket), f'{runtime}/wayland-0',
+    cmd += ['--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', SANDBOX_HOME]
+    return cmd
+
+
+def sandbox_command(book: Path, reader: str, bwrap: str, wayland_socket: Path) -> List[str]:
+    """
+    Builds the bubblewrap command. Inside the sandbox the reader has:
+
+    - no network and no access to the session D-Bus,
+    - a read-only system, an empty home folder and an empty /tmp,
+    - one book, read-only, and the Wayland socket to show its window.
+    """
+    runtime = f'/run/user/{os.getuid()}'
+    cmd = _base_bind(bwrap)
+    cmd += ['--dir', runtime, '--ro-bind', str(wayland_socket), f'{runtime}/wayland-0',
             '--ro-bind', str(book), f'/book/{book.name}',
             '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'HOME', SANDBOX_HOME,
             '--setenv', 'XDG_RUNTIME_DIR', runtime, '--setenv', 'WAYLAND_DISPLAY', 'wayland-0',
             '--setenv', 'QT_QPA_PLATFORM', 'wayland', '--setenv', 'GDK_BACKEND', 'wayland',
             '--setenv', 'LANG', 'C.UTF-8',
             '--chdir', '/book', reader, f'/book/{book.name}']
+    return cmd
+
+
+def tool_command(book: Path, argv: List[str], bwrap: str) -> List[str]:
+    """
+    Builds the bubblewrap command for a tool that parses an untrusted book (qpdf).
+    The tool has no network, no display, and the book read-only at /book/<name>.
+    """
+    cmd = _base_bind(bwrap)
+    cmd += ['--ro-bind', str(book), f'/book/{book.name}',
+            '--setenv', 'PATH', '/usr/bin:/bin', '--setenv', 'HOME', SANDBOX_HOME,
+            '--setenv', 'LANG', 'C.UTF-8',
+            '--chdir', '/book'] + list(argv)
     return cmd
 
 
