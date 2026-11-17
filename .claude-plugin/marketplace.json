@@ -1,0 +1,11 @@
+{
+  "name": "book-downloader-agent",
+  "owner": { "name": "Michota" },
+  "plugins": [
+    {
+      "name": "book-downloader",
+      "source": "./",
+      "description": "Bulk-downloads books with the bookdl CLI into a quarantine folder, with safety checks enforced by hooks."
+    }
+  ]
+}

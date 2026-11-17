@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""
+Runs `bookdl` out of the box: on the first run it creates a private virtual environment
+and installs the dependencies from `requirements.lock` with hash verification.
+"""
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import venv
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LOCK = ROOT / 'requirements.lock'
+DATA = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share') / 'bookdl'
+VENV = DATA / 'venv'
+STAMP = VENV / '.lock-sha256'
+PYTHON = VENV / 'bin' / 'python'
+RUN = "import sys; sys.path.insert(0, sys.argv.pop(1)); sys.argv[0] = 'bookdl'; from bookdl.cli import main; main()"
+
+
+def ensure_venv() -> None:
+    digest = hashlib.sha256(LOCK.read_bytes()).hexdigest()
+    if PYTHON.exists() and STAMP.exists() and STAMP.read_text().strip() == digest:
+        return
+    print("bookdl: installing pinned dependencies (first run or lock file changed)...", file=sys.stderr)
+    if VENV.exists():
+        shutil.rmtree(VENV)
+    DATA.mkdir(parents=True, exist_ok=True)
+    os.chmod(DATA, 0o700)
+    venv.EnvBuilder(with_pip=True).create(VENV)
+    subprocess.run([str(PYTHON), '-I', '-m', 'pip', 'install', '--quiet', '--disable-pip-version-check',
+                    '--no-deps', '--require-hashes', '--only-binary', ':all:', '-r', str(LOCK)], check=True)
+    STAMP.write_text(digest)
+
+
+if __name__ == '__main__':
+    try:
+        ensure_venv()
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"bookdl: cannot prepare the virtual environment ({type(e).__name__})", file=sys.stderr)
+        sys.exit(1)
+    os.execv(str(PYTHON), [str(PYTHON), '-I', '-c', RUN, str(ROOT), *sys.argv[1:]])
