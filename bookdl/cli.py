@@ -14,7 +14,7 @@ def main():
     parser.add_argument('--output-dir', type=Path, default=Path(config.DEFAULT_OUTPUT_DIR), help="Download directory")
     parser.add_argument('--queue-file', type=Path, default=Path(config.DEFAULT_QUEUE_FILE), help="Books queue JSON")
     parser.add_argument('--log-file', type=Path, default=Path(config.DEFAULT_LOG_FILE), help="Download log JSON")
-    parser.add_argument('--bypass-dns', action='store_true', help="Enable DNS bypass for blocked mirrors")
+    parser.add_argument('--bypass-dns', metavar='IP', type=str, default='', help="Resolve the LibGen hosts to this IP (supply an IP you trust)")
     
     parser.add_argument('--limit', type=int, default=0, help="Limit number of books (0=all)")
     parser.add_argument('--categories', type=str, default='', help="Comma-separated category IDs")
@@ -26,7 +26,7 @@ def main():
     args = parser.parse_args()
     
     if args.bypass_dns:
-        config.enable_dns_bypass()
+        config.enable_dns_bypass(args.bypass_dns, config.LIBGEN_MIRRORS + [config.LIBGEN_SEARCH_HOST])
         
     try:
         if args.command == 'extract':
