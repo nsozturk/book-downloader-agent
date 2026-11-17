@@ -3,7 +3,7 @@
 </div>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.8%2B-blue?logo=python&style=flat-square" alt="Python Version">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&style=flat-square" alt="Python Version">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License: MIT">
   <img src="https://img.shields.io/badge/Source-Anna's%20Archive-e74c3c?style=flat-square&logo=bookstack" alt="Source: Anna's Archive">
   <img src="https://img.shields.io/badge/Books%20Downloaded-1400%2B-blueviolet?style=flat-square" alt="Books Downloaded: 1400+">
@@ -26,11 +26,26 @@ This agent achieves an extremely high success rate (99%+) for mass downloads by 
 
 4. **Direct GET Link Extraction** — Bypasses ad pages by fetching `ads.php?md5={md5}` with a fake Referer, extracting the actual `get.php?md5=...&key=...` download token, and streaming the file directly to disk.
 
-5. **Automatic Category Sorting** — Organizes downloaded files into clean directories: `downloads/<category>/<subcategory>/<Title> - <Author>.<ext>`
+5. **Quarantine Folder** — Saves every file as `~/.local/share/bookdl/quarantine/<Title> - <Author>.<ext>`, away from desktop indexers. `bookdl open` shows a book in a sandboxed reader.
 
 6. **DNS Bypass** — Optional. Resolves the exact LibGen hosts to an IP that you supply, to work around ISP-level DNS blocks. No IP is hardcoded.
 
 ## Quick Start
+
+### As a Claude Code plugin (recommended)
+
+```bash
+claude plugin marketplace add Michota/book-downloader-agent
+claude plugin install book-downloader@book-downloader-agent
+```
+
+The plugin needs Python 3.10 or later. It gives you:
+
+- the command `bookdl` in the Bash tool. The first run creates a private virtual environment and installs the dependencies from `requirements.lock` with hash verification.
+- the skill `book-downloader` and the subagent `bookdl-runner`, which run the downloads.
+- a hook that enforces the safety rules. See [Security](#security).
+
+### Manual setup
 
 ```bash
 # Clone the repo
@@ -42,8 +57,10 @@ python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Install dependencies
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.lock
 ```
+
+In a manual setup, type `python -m bookdl` where this README says `bookdl`.
 
 ## Usage
 
@@ -70,13 +87,17 @@ python -m bookdl sync
 
 # Check current download progress
 python -m bookdl status
+
+# List the downloaded books, then open one in a sandboxed reader
+python -m bookdl open
+python -m bookdl open 3
 ```
 
 ### Global Options
 
 | Option | Description | Default |
 |---|---|---|
-| `--output-dir PATH` | Download directory | `./downloads` |
+| `--output-dir PATH` | Download directory | `~/.local/share/bookdl/quarantine` |
 | `--queue-file PATH` | Books queue JSON file | `./books_queue.json` |
 | `--log-file PATH` | Download log JSON file | `./download_log.json` |
 | `--bypass-dns IP` | Resolve the LibGen hosts to this IP (supply an IP you trust) | Off |
@@ -111,7 +132,7 @@ Create a JSON file with an array of book objects. See [`examples/books_queue.exa
 
 ### AI Agent Setup
 
-If you're using an agentic AI framework (Claude Code, Gemini, AutoGPT, etc.), provide [`system_prompt.md`](system_prompt.md) as the agent's system instructions. The agent will automatically understand how to use the CLI to search and download books.
+In Claude Code, install the plugin: the skill and the hook replace the system prompt. For another agentic AI framework (Gemini, AutoGPT, etc.), provide [`system_prompt.md`](system_prompt.md) as the agent's system instructions. The agent will automatically understand how to use the CLI to search and download books.
 
 ## Architecture
 
@@ -120,15 +141,23 @@ book-downloader-agent/
 ├── bookdl/                     # Core Python package
 │   ├── cli.py                  # CLI entry point with subcommands
 │   ├── config.py               # Mirror URLs, headers, DNS bypass
+│   ├── net.py                  # HTTPS-only requests, block on local addresses
 │   ├── search.py               # Anna's Archive + LibGen search
 │   ├── download.py             # File download + batch processing
 │   ├── extract.py              # Markdown → JSON queue parser
 │   ├── sync.py                 # Disk-to-log reconciliation
+│   ├── viewer.py               # Opens a book in a bubblewrap sandbox
 │   └── utils.py                # Shared utilities
+├── .claude-plugin/             # Plugin and marketplace manifests
+├── bin/bookdl                  # Wrapper: private venv + hash-pinned install
+├── hooks/                      # PreToolUse guard for Claude Code
+├── skills/book-downloader/     # Skill for Claude Code
+├── agents/bookdl-runner.md     # Restricted download subagent
 ├── examples/
 │   └── books_queue.example.json
 ├── system_prompt.md            # AI agent instructions
 ├── requirements.txt
+├── requirements.lock
 ├── LICENSE
 └── README.md
 ```
@@ -141,16 +170,37 @@ If your ISP blocks the DNS of the LibGen domains, pass an IP that you trust to t
 python -m bookdl download --bypass-dns 203.0.113.10
 ```
 
-This monkey-patches Python's `socket.getaddrinfo` so that only the exact hosts in `LIBGEN_MIRRORS` and `LIBGEN_SEARCH_HOST` (in `bookdl/config.py`) resolve to that IP. No IP is hardcoded. TLS still verifies the certificate against the original hostname, so a wrong IP gives a certificate error, not a swapped file.
+This uses the patch of Python's `socket.getaddrinfo` in `bookdl/net.py`, so that only the exact hosts in `LIBGEN_MIRRORS` and `LIBGEN_SEARCH_HOST` (in `bookdl/config.py`) resolve to that IP. No IP is hardcoded. TLS still verifies the certificate against the original hostname, so a wrong IP gives a certificate error, not a swapped file.
 
 ## Security
 
-- All search and download requests use HTTPS. A download whose final URL is not HTTPS is rejected.
+Checks in the downloader:
+
+- All search and download requests use HTTPS. The downloader follows redirects itself and rejects a hop that is not HTTPS.
+- A host that resolves to a loopback, private or link-local address is blocked at connect time. A mirror cannot make your computer call your router or a local service.
 - Each file must match the MD5 hash that it was found under. A file with a different hash is deleted.
-- The file type comes from the content (magic bytes), not from the link. Only PDF, EPUB, DjVu and MOBI/AZW are accepted.
+- The file type comes from the content (magic bytes at the start of the file), not from the link. Only PDF, EPUB, DjVu and MOBI/AZW are accepted.
 - Downloads larger than `MAX_FILE_SIZE` (500 MB, in `bookdl/config.py`) are aborted.
 - Existing files are never overwritten. A second copy gets the name `Title - Author (1).ext`.
-- Files from shadow libraries are untrusted. Open them in a sandboxed reader with JavaScript turned off.
+- The downloader prints no text that a server controls. An AI agent reads the output, so raw server text is a prompt injection channel.
+- `requirements.lock` pins every dependency with hashes.
+
+Handling of the downloaded files:
+
+- Files go to the quarantine folder `~/.local/share/bookdl/quarantine` (mode `0700`). The folder is outside the folders that desktop indexers scan by default, and it holds `.trackerignore` and `.nomedia` markers.
+- `bookdl open` starts the reader (`okular`, `zathura`, `evince`, `papers` or `mupdf`, or the one in `BOOKDL_READER`) inside a [bubblewrap](https://github.com/containers/bubblewrap) sandbox: no network, read-only system, empty home folder, one read-only book. It needs a Wayland session and refuses to open a book without the sandbox.
+
+Rules that the plugin hook (`hooks/guard.py`) enforces in Claude Code:
+
+- No agent can read, search or change the bookdl data folder with the file tools. A Bash command that names the folder is denied, unless it is a plain `bookdl ...` command.
+- The subagent `bookdl-runner` can run only plain `bookdl ...` commands with relative paths, and can use files only inside the working directory.
+
+Limits that you must know:
+
+- The MD5 check proves that the file is the one that the library lists. It does not prove that the file is harmless. Open books only with `bookdl open`.
+- The check of Bash commands is a text match. It stops an agent that follows an injected instruction in the obvious way. It is not a sandbox for Bash.
+- If you pass `--output-dir`, the files are outside the quarantine folder and outside the hook.
+- Do not browse the quarantine folder in a file manager with previews turned on. A thumbnailer parses the files without a sandbox.
 
 ## License
 
