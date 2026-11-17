@@ -7,7 +7,7 @@ Every session:
 - a Bash command that names that folder is denied, unless it is a plain `bookdl ...` command.
 
 The `bookdl-runner` subagent, in addition:
-- Bash runs only plain `bookdl ...` commands, with relative paths and without `--output-dir`,
+- Bash runs only plain `bookdl ...` commands, with relative paths, without `--output-dir` and `--library-dir`,
 - file tools work only inside the working directory.
 
 Downloaded books are untrusted. Their text must not reach an agent that can run commands.
@@ -22,7 +22,7 @@ RUNNER_AGENTS = {'bookdl-runner', 'book-downloader:bookdl-runner'}
 FILE_TOOLS = {'Read': 'file_path', 'Edit': 'file_path', 'Write': 'file_path',
               'NotebookEdit': 'notebook_path', 'Grep': 'path', 'Glob': 'path'}
 PLAIN_BOOKDL = re.compile(r'[ \t]*bookdl([ \t]+[A-Za-z0-9_./,=:@%+~-]+)*[ \t]*')
-RUNNER_BANNED = re.compile(r'(^|[\s=])[/~]|\.\.|--output-dir')
+RUNNER_BANNED = re.compile(r'(^|[\s=])[/~]|\.\.|--output-dir|--library-dir')
 
 
 def data_dir() -> Path:
@@ -64,7 +64,7 @@ def main() -> None:
         plain = bool(PLAIN_BOOKDL.fullmatch(command))
         if is_runner and (not plain or RUNNER_BANNED.search(command)):
             deny("bookdl-runner can run only plain `bookdl ...` commands with relative paths "
-                 "and without --output-dir.")
+                 "and without --output-dir or --library-dir.")
         names_protected = 'share/bookdl' in command or str(protected) in command
         if names_protected and not plain:
             deny("The bookdl data folder holds untrusted downloads. Use `bookdl status` or "

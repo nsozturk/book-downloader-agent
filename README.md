@@ -91,6 +91,13 @@ python -m bookdl status
 # List the downloaded books, then open one in a sandboxed reader
 python -m bookdl open
 python -m bookdl open 3
+
+# List the books in quarantine, then check one and move it to ~/Books
+python -m bookdl release
+python -m bookdl release 3
+
+# Check every book in quarantine and move the ones that pass
+python -m bookdl release --all
 ```
 
 ### Global Options
@@ -98,6 +105,7 @@ python -m bookdl open 3
 | Option | Description | Default |
 |---|---|---|
 | `--output-dir PATH` | Download directory | `~/.local/share/bookdl/quarantine` |
+| `--library-dir PATH` | Folder for books that pass `bookdl release` | `~/Books` |
 | `--queue-file PATH` | Books queue JSON file | `./books_queue.json` |
 | `--log-file PATH` | Download log JSON file | `./download_log.json` |
 | `--bypass-dns IP` | Resolve the LibGen hosts to this IP (supply an IP you trust) | Off |
@@ -147,6 +155,7 @@ book-downloader-agent/
 │   ├── extract.py              # Markdown → JSON queue parser
 │   ├── sync.py                 # Disk-to-log reconciliation
 │   ├── viewer.py               # Opens a book in a bubblewrap sandbox
+│   ├── release.py              # Checks quarantined books, moves passing ones to ~/Books
 │   └── utils.py                # Shared utilities
 ├── .claude-plugin/             # Plugin and marketplace manifests
 ├── bin/bookdl                  # Wrapper: private venv + hash-pinned install
@@ -193,7 +202,7 @@ Handling of the downloaded files:
 Rules that the plugin hook (`hooks/guard.py`) enforces in Claude Code:
 
 - No agent can read, search or change the bookdl data folder with the file tools. A Bash command that names the folder is denied, unless it is a plain `bookdl ...` command.
-- The subagent `bookdl-runner` can run only plain `bookdl ...` commands with relative paths, and can use files only inside the working directory.
+- The subagent `bookdl-runner` can run only plain `bookdl ...` commands with relative paths, without `--output-dir` and without `--library-dir`, and can use files only inside the working directory.
 
 Limits that you must know:
 
@@ -201,6 +210,35 @@ Limits that you must know:
 - The check of Bash commands is a text match. It stops an agent that follows an injected instruction in the obvious way. It is not a sandbox for Bash.
 - If you pass `--output-dir`, the files are outside the quarantine folder and outside the hook.
 - Do not browse the quarantine folder in a file manager with previews turned on. A thumbnailer parses the files without a sandbox.
+
+### Release from quarantine
+
+`bookdl release [target] [--all] [--library-dir PATH]` checks the books in the quarantine folder and moves each book that passes every check to the library folder `~/Books`. The library folder is outside `~/.local/share/bookdl`, so the plugin hook does not block it. `target` is a list number or a part of the file name. Without `target` and without `--all`, the command prints the numbered list and exits with code 1.
+
+The command runs two checks, in this order. A file that fails any check stays in the quarantine folder.
+
+1. VirusTotal hash lookup, only if `VT_API_KEY` is set. Any engine that reports "malicious" or "suspicious" fails the book. A quota error or another API error also fails it (fail-closed). A hash that VirusTotal does not know gives a warning. Without the key, the command prints one warning line and continues.
+2. Active-content check. A PDF is inspected with `qpdf --json`. An EPUB is inspected with the Python `zipfile` module. DjVu and MOBI files are not inspected, and the command prints a warning.
+
+The policy is detect and refuse. The command never strips or rewrites a file, because `qpdf` has no option that removes JavaScript.
+
+Each book gets one result line: `RELEASED: <name> -> <path>` or `KEPT IN QUARANTINE: <name>: <reason>`. The exit code is 0 if every processed book was released, and 1 otherwise.
+
+To turn on the VirusTotal lookup, make a free VirusTotal account and set the key:
+
+```bash
+export VT_API_KEY=your_key_here
+```
+
+Only the SHA-256 hash of the file is sent, never the file. VirusTotal sees which file you ask about.
+
+Limits of the release check:
+
+- A pass means "no engine on VirusTotal flags the file, and the common active-content patterns are absent". It does not mean "proven safe".
+- A new exploit hidden in a font or an image passes every check.
+- DjVu and MOBI files get no active-content check.
+- A released book is still untrusted. An agent that has a shell must not follow instructions found inside it.
+- `bookdl release` needs bubblewrap and network access. If the Bash tool of an agent is sandboxed, run `! bookdl release --all` yourself.
 
 ## License
 
