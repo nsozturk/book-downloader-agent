@@ -5,6 +5,8 @@ description: Download books with the bookdl CLI, safely. The user gives only a l
 
 # Book downloader
 
+`bookdl` searches and downloads from LibGen mirrors and Anna's Archive.
+
 The plugin puts the command `bookdl` on the `PATH` of the Bash tool. The first run installs the pinned dependencies into a private virtual environment. No setup step is needed.
 
 ## Download

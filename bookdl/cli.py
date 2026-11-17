@@ -11,7 +11,7 @@ from bookdl.release import release_books
 from bookdl.viewer import find_book, open_sandboxed
 
 def main():
-    parser = argparse.ArgumentParser(description="bookdl - Shadow Library Book Downloader Agent", allow_abbrev=False)
+    parser = argparse.ArgumentParser(description="bookdl - Book Downloader Agent", allow_abbrev=False)
     parser.add_argument('command', choices=['download', 'retry', 'extract', 'sync', 'status', 'open', 'release'], help="Command to run")
     parser.add_argument('target', nargs='?', default='', help="For `open` and `release`: the list number or a part of the file name")
     

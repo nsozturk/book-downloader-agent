@@ -1,7 +1,7 @@
 {
   "name": "book-downloader",
   "description": "Bulk-downloads books with the bookdl CLI into a quarantine folder. Verifies every file, blocks agents from reading the downloads, and opens books in a sandbox with no network.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": { "name": "Michota" },
   "repository": "https://github.com/Michota/book-downloader-agent",
   "license": "MIT",

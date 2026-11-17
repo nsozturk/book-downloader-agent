@@ -12,7 +12,7 @@
 
 # Book Downloader Agent
 
-> 📚 An AI agent system that bulk-downloads books from **[Anna's Archive](https://annas-archive.org)** and shadow library mirrors (LibGen, IPFS) — no API keys, no paid accounts. Battle-tested on **1,400+ academic books** with a **99% success rate**.
+> 📚 An AI agent system that bulk-downloads books from **[Anna's Archive](https://annas-archive.org)** and LibGen mirrors — no API keys, no paid accounts. Battle-tested on **1,400+ academic books** with a **99% success rate**.
 
 ## Features & Proven Methods
 
