@@ -1,11 +1,10 @@
-import socket
-from typing import Iterable
+import os
+from pathlib import Path
 
 ANNA_MIRRORS = ['annas-archive.gl', 'annas-archive.pk', 'annas-archive.gd', 'annas-archive.vg']
 LIBGEN_MIRRORS = ['libgen.la', 'libgen.gl', 'libgen.vg', 'libgen.is', 'libgen.rs']
 LIBGEN_SEARCH_HOST = 'libgen.li'
 LIBGEN_SEARCH = f'https://{LIBGEN_SEARCH_HOST}'
-DEFAULT_OUTPUT_DIR = './downloads'
 DEFAULT_QUEUE_FILE = './books_queue.json'
 DEFAULT_LOG_FILE = './download_log.json'
 HEADERS = {
@@ -14,20 +13,19 @@ HEADERS = {
 MIN_FILE_SIZE = 10000
 MAX_FILE_SIZE = 500 * 1024 * 1024
 
-def enable_dns_bypass(ip: str, hosts: Iterable[str]) -> None:
+def default_output_dir() -> Path:
     """
-    Monkey-patches socket.getaddrinfo so that only the exact hosts given resolve to `ip`.
-
-    The IP must come from the user. TLS still verifies the certificate against the
-    original hostname, so a wrong IP produces a certificate error, not a swapped file.
+    The quarantine folder: `$XDG_DATA_HOME/bookdl/quarantine` (default `~/.local/share/bookdl/quarantine`).
+    It is outside the folders that desktop file indexers scan by default.
     """
-    pinned = {h.lower() for h in hosts}
-    print(f"WARNING: DNS bypass enabled: {', '.join(sorted(pinned))} -> {ip}")
-    _original_getaddrinfo = socket.getaddrinfo
+    base = os.environ.get('XDG_DATA_HOME') or str(Path.home() / '.local' / 'share')
+    return Path(base) / 'bookdl' / 'quarantine'
 
-    def _patched_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-        if isinstance(host, str) and host.lower() in pinned:
-            return _original_getaddrinfo(ip, port, family, type, proto, flags)
-        return _original_getaddrinfo(host, port, family, type, proto, flags)
-
-    socket.getaddrinfo = _patched_getaddrinfo
+def prepare_quarantine(path: Path) -> None:
+    """
+    Creates the quarantine folder with mode 0700 and adds marker files that tell indexers to skip it.
+    """
+    path.mkdir(parents=True, exist_ok=True)
+    os.chmod(path, 0o700)
+    for marker in ('.trackerignore', '.nomedia'):
+        (path / marker).touch(exist_ok=True)

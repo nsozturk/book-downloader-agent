@@ -7,7 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from bookdl.utils import build_queries, sanitize_filename, save_json, load_json
+from bookdl.utils import build_queries, sanitize_filename, save_json, load_json, safe_text
+from bookdl.net import https_get
 from bookdl.search import search_md5_candidates, get_direct_download_url, get_working_mirror
 from bookdl.config import HEADERS, LIBGEN_MIRRORS, MIN_FILE_SIZE, MAX_FILE_SIZE, ANNA_MIRRORS
 
@@ -17,7 +18,7 @@ def detect_book_type(head: bytes) -> Optional[str]:
     """
     Detects the book format from the first bytes of the file. Returns the extension or None.
     """
-    if b'%PDF-' in head[:1024]:
+    if head[:5] == b'%PDF-':
         return 'pdf'
     if head[:4] == b'PK\x03\x04' and head[30:58] == b'mimetypeapplication/epub+zip':
         return 'epub'
@@ -52,14 +53,11 @@ def download_file(url: str, referer: str, expected_md5: str, output_dir: Path, b
     tmp_path = Path(tmp_name)
     try:
         with os.fdopen(fd, 'wb') as f:
-            with requests.get(url, headers=headers, stream=True, timeout=20) as r:
+            with https_get(url, headers=headers, stream=True, timeout=20) as r:
                 r.raise_for_status()
-                if not r.url.startswith('https://'):
-                    print(f"Rejected: final URL is not HTTPS ({r.url})")
-                    return None
                 length = r.headers.get('Content-Length')
                 if length and length.isdigit() and int(length) > max_size:
-                    print(f"Rejected: Content-Length {length} exceeds {max_size} bytes")
+                    print(f"Rejected: Content-Length exceeds {max_size} bytes")
                     return None
 
                 md5 = hashlib.md5()
@@ -93,7 +91,7 @@ def download_file(url: str, referer: str, expected_md5: str, output_dir: Path, b
             os.replace(tmp_path, dest_path)
         return dest_path
     except (requests.RequestException, OSError) as e:
-        print(f"Download error: {e}")
+        print(f"Download error: {type(e).__name__}")
         return None
     finally:
         if tmp_path.exists():
@@ -109,16 +107,16 @@ def download_book(book: Dict[str, Any], anna_mirror: str, output_dir: Path, log_
     queries = build_queries(book.get('title', ''), book.get('author', ''), book.get('search_query', ''))
     
     for query in queries:
-        print(f"Searching: {query}")
+        print(f"Searching: {safe_text(query)}")
         md5_candidates = search_md5_candidates(query, anna_mirror)
         for md5 in md5_candidates:
             url, referer = get_direct_download_url(md5, LIBGEN_MIRRORS)
             if url:
                 base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
-                print(f"Downloading {base_name} (md5 {md5})...")
+                print(f"Downloading {safe_text(base_name)} (md5 {md5})...")
                 dest_path = download_file(url, referer or '', md5, output_dir, base_name)
                 if dest_path:
-                    print(f"Download successful: {dest_path}")
+                    print(f"Download successful: {safe_text(dest_path, 400)}")
                     book_id = book.get('id', str(hash(book.get('title'))))
                     log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
                     save_json(log_file, log_data)
@@ -182,7 +180,7 @@ def download_parallel(books: List[Dict[str, Any]], output_dir: Path, log_file: P
                     base_name = sanitize_filename(f"{book.get('title', 'Unknown')} - {book.get('author', 'Unknown')}")
                     dest_path = download_file(url, referer or '', md5, output_dir, base_name)
                     if dest_path:
-                        print(f"Download successful: {dest_path}")
+                        print(f"Download successful: {safe_text(dest_path, 400)}")
                         with lock:
                             log_data[book_id] = {'status': 'SUCCESS', 'file': str(dest_path)}
                             save_json(log_file, log_data)

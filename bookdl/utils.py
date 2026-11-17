@@ -12,6 +12,13 @@ def sanitize_filename(name: str) -> str:
     name = re.sub(r'[\\/*?:"<>|]', '', name)
     return name.strip()[:150]
 
+def safe_text(text: Any, limit: int = 120) -> str:
+    """
+    Makes a string safe to print: one line, printable characters only, at most `limit` characters.
+    An AI agent reads the output, so text from a server or from a book list must not reach it raw.
+    """
+    return ''.join(c if c.isprintable() else ' ' for c in str(text))[:limit]
+
 def clean_query_text(text: str) -> str:
     """
     Removes parentheticals, brackets, and academic abbreviations.

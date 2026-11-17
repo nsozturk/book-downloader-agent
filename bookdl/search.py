@@ -1,9 +1,8 @@
-import html
 import re
 import requests
-from urllib.parse import urljoin, urlsplit, urlunsplit
 from typing import List, Tuple, Optional
 from bookdl.config import LIBGEN_SEARCH
+from bookdl.net import https_get, safe_https_url
 
 def get_working_mirror(mirrors: List[str], headers: dict) -> str:
     """
@@ -12,7 +11,7 @@ def get_working_mirror(mirrors: List[str], headers: dict) -> str:
     for mirror in mirrors:
         url = f"https://{mirror}/search?q=test"
         try:
-            response = requests.get(url, headers=headers, timeout=5)
+            response = https_get(url, headers=headers, timeout=5)
             if response.status_code == 200:
                 return mirror
         except requests.RequestException:
@@ -27,7 +26,7 @@ def search_md5_candidates(query: str, anna_mirror: str, max_candidates: int = 10
     headers = {'User-Agent': 'Mozilla/5.0'}
 
     try:
-        resp = requests.get(f"{LIBGEN_SEARCH}/index.php", params={'req': query}, headers=headers, timeout=10)
+        resp = https_get(f"{LIBGEN_SEARCH}/index.php", params={'req': query}, headers=headers, timeout=10)
         if resp.status_code == 200:
             md5_list.extend(re.findall(r'md5=([a-fA-F0-9]{32})', resp.text, re.IGNORECASE))
     except requests.RequestException:
@@ -35,7 +34,7 @@ def search_md5_candidates(query: str, anna_mirror: str, max_candidates: int = 10
 
     if len(md5_list) < max_candidates and anna_mirror:
         try:
-            resp = requests.get(f"https://{anna_mirror}/search", params={'q': query}, headers=headers, timeout=10)
+            resp = https_get(f"https://{anna_mirror}/search", params={'q': query}, headers=headers, timeout=10)
             if resp.status_code == 200:
                 md5_list.extend(re.findall(r'md5/([a-fA-F0-9]{32})', resp.text, re.IGNORECASE))
         except requests.RequestException:
@@ -50,20 +49,6 @@ def search_md5_candidates(query: str, anna_mirror: str, max_candidates: int = 10
                 break
     return unique
 
-def _safe_https_url(base: str, link: str) -> Optional[str]:
-    """
-    Resolves `link` against `base`, upgrades http:// to https:// and rejects any other scheme.
-    """
-    absolute = urljoin(base, html.unescape(link))
-    parts = urlsplit(absolute)
-    if parts.scheme == 'http':
-        parts = parts._replace(scheme='https')
-    elif parts.scheme != 'https':
-        return None
-    if not parts.netloc:
-        return None
-    return urlunsplit(parts)
-
 def get_direct_download_url(md5: str, libgen_mirrors: List[str]) -> Tuple[Optional[str], Optional[str]]:
     """
     Fetches the download URL for an MD5 hash from libgen mirrors over HTTPS.
@@ -73,13 +58,13 @@ def get_direct_download_url(md5: str, libgen_mirrors: List[str]) -> Tuple[Option
     for mirror in libgen_mirrors:
         try:
             url = f"https://{mirror}/ads.php?md5={md5}"
-            resp = requests.get(url, headers=headers, timeout=10)
-            if resp.status_code == 200 and resp.url.startswith('https://'):
+            resp = https_get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
                 match = re.search(r'href="(get\.php\?md5=[^"]+)"', resp.text)
                 if not match:
                     match = re.search(r'href="([^"]+\.(?:pdf|epub))"', resp.text, re.IGNORECASE)
                 if match:
-                    link = _safe_https_url(resp.url, match.group(1))
+                    link = safe_https_url(resp.url, match.group(1))
                     if link:
                         return link, url
         except requests.RequestException:

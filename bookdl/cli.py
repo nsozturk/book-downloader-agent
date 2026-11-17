@@ -2,16 +2,19 @@ import argparse
 import sys
 from pathlib import Path
 from bookdl import config
+from bookdl.net import install_network_guard
 from bookdl.download import download_batch, download_parallel
 from bookdl.extract import extract_books
 from bookdl.sync import sync_log_from_disk
 from bookdl.utils import load_json
+from bookdl.viewer import find_book, open_sandboxed
 
 def main():
     parser = argparse.ArgumentParser(description="bookdl - Shadow Library Book Downloader Agent")
-    parser.add_argument('command', choices=['download', 'retry', 'extract', 'sync', 'status'], help="Command to run")
+    parser.add_argument('command', choices=['download', 'retry', 'extract', 'sync', 'status', 'open'], help="Command to run")
+    parser.add_argument('target', nargs='?', default='', help="For `open`: the list number or a part of the file name")
     
-    parser.add_argument('--output-dir', type=Path, default=Path(config.DEFAULT_OUTPUT_DIR), help="Download directory")
+    parser.add_argument('--output-dir', type=Path, default=None, help="Download directory (default: the quarantine folder)")
     parser.add_argument('--queue-file', type=Path, default=Path(config.DEFAULT_QUEUE_FILE), help="Books queue JSON")
     parser.add_argument('--log-file', type=Path, default=Path(config.DEFAULT_LOG_FILE), help="Download log JSON")
     parser.add_argument('--bypass-dns', metavar='IP', type=str, default='', help="Resolve the LibGen hosts to this IP (supply an IP you trust)")
@@ -25,9 +28,16 @@ def main():
     
     args = parser.parse_args()
     
-    if args.bypass_dns:
-        config.enable_dns_bypass(args.bypass_dns, config.LIBGEN_MIRRORS + [config.LIBGEN_SEARCH_HOST])
-        
+    try:
+        install_network_guard(args.bypass_dns, config.LIBGEN_MIRRORS + [config.LIBGEN_SEARCH_HOST])
+    except ValueError:
+        print("Error: --bypass-dns needs a valid IP address")
+        sys.exit(1)
+
+    if args.output_dir is None:
+        args.output_dir = config.default_output_dir()
+        config.prepare_quarantine(args.output_dir)
+
     try:
         if args.command == 'extract':
             if not args.docs_dir:
@@ -53,6 +63,10 @@ def main():
             else:
                 download_batch(queue, args.output_dir, args.queue_file, args.log_file, args.limit, args.categories)
                 
+        elif args.command == 'open':
+            book = find_book(args.output_dir, args.target)
+            sys.exit(open_sandboxed(book) if book else 1)
+
         elif args.command == 'sync':
             stats = sync_log_from_disk(args.output_dir, args.queue_file, args.log_file)
             print("Sync complete. Stats:")
