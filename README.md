@@ -28,7 +28,7 @@ This agent achieves an extremely high success rate (99%+) for mass downloads by 
 
 5. **Automatic Category Sorting** — Organizes downloaded files into clean directories: `downloads/<category>/<subcategory>/<Title> - <Author>.<ext>`
 
-6. **DNS Bypass** — Optional monkey-patched `socket.getaddrinfo` to bypass ISP-level DNS blocks on LibGen/BooksDL domains.
+6. **DNS Bypass** — Optional. Resolves the exact LibGen hosts to an IP that you supply, to work around ISP-level DNS blocks. No IP is hardcoded.
 
 ## Quick Start
 
@@ -79,7 +79,7 @@ python -m bookdl status
 | `--output-dir PATH` | Download directory | `./downloads` |
 | `--queue-file PATH` | Books queue JSON file | `./books_queue.json` |
 | `--log-file PATH` | Download log JSON file | `./download_log.json` |
-| `--bypass-dns` | Enable DNS bypass for blocked mirrors | Off |
+| `--bypass-dns IP` | Resolve the LibGen hosts to this IP (supply an IP you trust) | Off |
 | `--limit N` | Limit number of books to process | `0` (all) |
 | `--categories IDS` | Comma-separated category IDs to filter | All |
 
@@ -135,13 +135,22 @@ book-downloader-agent/
 
 ## Anti-Blocking Features
 
-If your ISP blocks LibGen or BooksDL domains, use the `--bypass-dns` flag:
+If your ISP blocks the DNS of the LibGen domains, pass an IP that you trust to the `--bypass-dns` flag:
 
 ```bash
-python -m bookdl download --bypass-dns
+python -m bookdl download --bypass-dns 203.0.113.10
 ```
 
-This monkey-patches Python's `socket.getaddrinfo` to resolve blocked domains to a known Cloudflare IP. The IP can be overridden in `bookdl/config.py` if it changes.
+This monkey-patches Python's `socket.getaddrinfo` so that only the exact hosts in `LIBGEN_MIRRORS` and `LIBGEN_SEARCH_HOST` (in `bookdl/config.py`) resolve to that IP. No IP is hardcoded. TLS still verifies the certificate against the original hostname, so a wrong IP gives a certificate error, not a swapped file.
+
+## Security
+
+- All search and download requests use HTTPS. A download whose final URL is not HTTPS is rejected.
+- Each file must match the MD5 hash that it was found under. A file with a different hash is deleted.
+- The file type comes from the content (magic bytes), not from the link. Only PDF, EPUB, DjVu and MOBI/AZW are accepted.
+- Downloads larger than `MAX_FILE_SIZE` (500 MB, in `bookdl/config.py`) are aborted.
+- Existing files are never overwritten. A second copy gets the name `Title - Author (1).ext`.
+- Files from shadow libraries are untrusted. Open them in a sandboxed reader with JavaScript turned off.
 
 ## License
 

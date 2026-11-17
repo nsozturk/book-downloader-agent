@@ -26,7 +26,7 @@ You have a CLI tool called `bookdl` installed in the project. Use `python -m boo
 - `--output-dir PATH` — Custom download directory (default: `./downloads`)
 - `--queue-file PATH` — Custom queue file (default: `./books_queue.json`)
 - `--log-file PATH` — Custom log file (default: `./download_log.json`)
-- `--bypass-dns` — Enable DNS bypass for ISP-blocked mirrors
+- `--bypass-dns IP` — Resolve the LibGen hosts to an IP that the user supplies. Use it only when the user says that the ISP blocks LibGen DNS and gives the IP. Never pick an IP yourself. TLS still checks the certificate against the real hostname.
 
 ---
 
@@ -87,9 +87,9 @@ When asked to download books, follow this workflow:
 
 1. **Check if `books_queue.json` exists.** If not, ask the user for a source (markdown files or direct JSON).
 2. **If markdown files are provided**, run: `python -m bookdl extract --docs-dir <path>`
-3. **Start the main download**: `python -m bookdl download --parallel --bypass-dns`
+3. **Start the main download**: `python -m bookdl download --parallel`
 4. **Check progress**: `python -m bookdl status`
-5. **Retry failures**: `python -m bookdl retry --bypass-dns`
+5. **Retry failures**: `python -m bookdl retry`
 6. **Sync disk state**: `python -m bookdl sync`
 7. **Report final results**: `python -m bookdl status`
 
