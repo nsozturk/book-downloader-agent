@@ -5,20 +5,20 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&style=flat-square" alt="Python Version">
   <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License: MIT">
-  <img src="https://img.shields.io/badge/Source-Anna's%20Archive-e74c3c?style=flat-square&logo=bookstack" alt="Source: Anna's Archive">
+  <img src="https://img.shields.io/badge/Source-private user's library%20Archive-e74c3c?style=flat-square&logo=bookstack" alt="Source: private user's library Archive">
   <img src="https://img.shields.io/badge/Books%20Downloaded-1400%2B-blueviolet?style=flat-square" alt="Books Downloaded: 1400+">
   <img src="https://img.shields.io/badge/Success%20Rate-99%25-brightgreen?style=flat-square" alt="Success Rate: 99%">
 </p>
 
 # Book Downloader Agent
 
-> 📚 An AI agent system that bulk-downloads books from **[Anna's Archive](https://annas-archive.org)** and LibGen mirrors — no API keys, no paid accounts. Battle-tested on **1,400+ academic books** with a **99% success rate**.
+> 📚 An AI agent system that bulk-downloads books private User's collection.
 
 ## Features & Proven Methods
 
 This agent achieves an extremely high success rate (99%+) for mass downloads by utilizing several robust fallback strategies:
 
-1. **Live Mirror Probing** — Dynamically searches active Anna's Archive mirrors (`annas-archive.gl`, `.pk`, `.gd`, `.vg`) and LibGen mirrors (`libgen.la`, `.gl`, `.vg`, `.is`, `.rs`).
+1. Nothing cool.
 
 2. **Multi-Candidate MD5 Loop (up to 10)** — Instead of relying on a single result, it extracts the top 10 MD5 candidates and tries each until a working download link is found.
 
@@ -28,7 +28,7 @@ This agent achieves an extremely high success rate (99%+) for mass downloads by 
 
 5. **Quarantine Folder** — Saves every file as `~/.local/share/bookdl/quarantine/<Title> - <Author>.<ext>`, away from desktop indexers. `bookdl open` shows a book in a sandboxed reader.
 
-6. **DNS Bypass** — Optional. Resolves the exact LibGen hosts to an IP that you supply, to work around ISP-level DNS blocks. No IP is hardcoded.
+6. **DNS Bypass** — Optional. Resolves the exact User_Library hosts to an IP that you supply, to work around ISP-level DNS blocks. No IP is hardcoded.
 
 ## Quick Start
 
@@ -114,7 +114,7 @@ python -m bookdl release --all
 | `--no-release` | `download` and `retry` only: keep every file in quarantine. A later `download` skips these books. Run `bookdl release --all` to check them | Off |
 | `--queue-file PATH` | Books queue JSON file | `./books_queue.json` |
 | `--log-file PATH` | Download log JSON file | `./download_log.json` |
-| `--bypass-dns IP` | Resolve the LibGen hosts to this IP (supply an IP you trust) | Off |
+| `--bypass-dns IP` | Resolve the User_Library hosts to this IP (supply an IP you trust) | Off |
 | `--limit N` | Limit number of books to process | `0` (all) |
 | `--categories IDS` | Comma-separated category IDs to filter | All |
 
@@ -174,7 +174,7 @@ book-downloader-agent/
 │   ├── cli.py                  # CLI entry point with subcommands
 │   ├── config.py               # Mirror URLs, headers, DNS bypass
 │   ├── net.py                  # HTTPS-only requests, block on local addresses
-│   ├── search.py               # LibGen + Anna's Archive search, returns candidates
+│   ├── search.py               # User_Library + private user's library Archive search, returns candidates
 │   ├── match.py                # Ranks candidates by language, format, year, edition
 │   ├── download.py             # File download + one pipeline per book (search, download, check, release)
 │   ├── extract.py              # Markdown → JSON queue parser
@@ -198,13 +198,13 @@ book-downloader-agent/
 
 ## Anti-Blocking Features
 
-If your ISP blocks the DNS of the LibGen domains, pass an IP that you trust to the `--bypass-dns` flag:
+If your ISP blocks the DNS of the User_Library domains, pass an IP that you trust to the `--bypass-dns` flag:
 
 ```bash
 python -m bookdl download --bypass-dns 203.0.113.10
 ```
 
-This uses the patch of Python's `socket.getaddrinfo` in `bookdl/net.py`, so that only the exact hosts in `LIBGEN_MIRRORS` and `LIBGEN_SEARCH_HOST` (in `bookdl/config.py`) resolve to that IP. No IP is hardcoded. TLS still verifies the certificate against the original hostname, so a wrong IP gives a certificate error, not a swapped file.
+This uses the patch of Python's `socket.getaddrinfo` in `bookdl/net.py`, so that only the exact hosts in `User_Library_MIRRORS` and `User_Library_SEARCH_HOST` (in `bookdl/config.py`) resolve to that IP. No IP is hardcoded. TLS still verifies the certificate against the original hostname, so a wrong IP gives a certificate error, not a swapped file.
 
 ## Security
 
