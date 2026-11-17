@@ -62,6 +62,16 @@ pip install --require-hashes -r requirements.lock
 
 In a manual setup, type `python -m bookdl` where this README says `bookdl`.
 
+### In opencode
+
+The Claude Code plugin does not load in opencode. The repo holds a separate subagent for it: `.opencode/agents/bookdl-runner.md`.
+
+1. Put `bookdl` on your `PATH`: `ln -s "$PWD/bin/bookdl" ~/.local/bin/bookdl` (run it in the repo folder).
+2. Start opencode in the repo folder, or copy the agent file to `~/.config/opencode/agents/` to have it in every project.
+3. Ask for the books. The main agent passes the list to the subagent `bookdl-runner`.
+
+The `permissions` list of the subagent replaces the Claude Code hook. It denies everything, then allows plain `bookdl ...` commands with relative paths and file access inside the project folder. A file path outside the project, such as the quarantine folder, is denied. The checks inside `bookdl` itself are the same in every agent.
+
 ## Usage
 
 ### CLI Commands
