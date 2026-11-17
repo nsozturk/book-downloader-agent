@@ -224,10 +224,9 @@ class ReleaseBooksTest(unittest.TestCase):
 class ToolCommandTest(unittest.TestCase):
     def test_tool_command_shape(self):
         book = Path('/tmp/some book.pdf')
-        cmd = tool_command(book, ['qpdf', '--check', '/book/some book.pdf'], '/usr/bin/bwrap', ['/nonexistent-dir'])
+        cmd = tool_command(book, ['qpdf', '--check', '/book/some book.pdf'], '/usr/bin/bwrap')
         self.assertIn('--unshare-all', cmd)
         self.assertNotIn('wayland-0', ' '.join(cmd))
-        self.assertNotIn('/nonexistent-dir', cmd)
         i = cmd.index('/book/some book.pdf')
         self.assertEqual(cmd[i - 2:i + 1], ['--ro-bind', str(book), '/book/some book.pdf'])
         self.assertEqual(cmd[-3:], ['qpdf', '--check', '/book/some book.pdf'])
